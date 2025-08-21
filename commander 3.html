@@ -1,0 +1,939 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Gestor de Torneo de Commander</title>
+    
+    <!-- PWA Manifest & Service Worker -->
+    <link rel="manifest" href="/manifest.json">
+    <script>
+        // Registrar el Service Worker para que la app funcione sin conexión
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/service-worker.js')
+                    .then(registration => {
+                        console.log('Service Worker registrado con éxito:', registration);
+                    })
+                    .catch(error => {
+                        console.log('Fallo en el registro del Service Worker:', error);
+                    });
+            });
+        }
+    </script>
+
+    <!-- PWA Icons & Splash Screens (para una mejor experiencia visual) -->
+    <link rel="icon" href="https://placehold.co/192x192/fb0b01/fff?text=MTG" sizes="192x192">
+    <link rel="apple-touch-icon" href="https://placehold.co/180x180/fb0b01/fff?text=MTG">
+    <meta name="theme-color" content="#000000">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Torneo MTG">
+    
+    <style>
+        :root { --bg:#000000; --card:#111; --muted:#6b7280; --accent:#fb0b01; --ok:#16a34a; --warn:#eab308; --bad:#dc2626; }
+        body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif; background: var(--bg); margin: 0; color:#fff; }
+        .wrap { max-width: 900px; margin: auto; padding: 24px; }
+        .header { display: flex; align-items: center; margin-bottom: 16px; }
+        .header-logo { width: 48px; height: 48px; border-radius: 8px; margin-right: 12px; }
+        .header-title-group { flex-grow: 1; }
+        #tournamentTitle { font-size: 22px; margin: 0; outline: none; padding: 2px 0; border-bottom: 1px dotted transparent; transition: border-color 0.2s; color:var(--accent); }
+        #tournamentTitle:hover { border-bottom: 1px dotted var(--muted); }
+        #tournamentTitle:empty:before { content: attr(data-placeholder); color: var(--muted); }
+        h2 { font-size: 18px; margin: 0 0 10px; color:var(--accent); }
+        h3 { color: #fff; }
+        .section { background: var(--card); border: 1px solid #1f2937; border-radius: 14px; padding: 14px; margin-bottom: 16px; box-shadow: 0 2px 6px rgba(0,0,0,.14); }
+        .row { display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+        input, select, button { padding: 8px 10px; border-radius: 10px; border: 1px solid #374151; font-size: 14px; background-color: #1f2937; color: white; }
+        button { background:var(--accent); color:#fff; border-color:var(--accent); cursor:pointer; }
+        button.ghost { background:transparent; color:var(--accent); border-color:var(--accent); }
+        button[disabled] { background:#1f2937; border-color:#374151; color:#6b7280; cursor:not-allowed; }
+        .muted { color: var(--muted); font-size: 12px; }
+        .pill { display:inline-block; padding:.2rem .5rem; border-radius:999px; background:#3730a3; color:#fff; font-size:12px; margin-left:6px; }
+        table { width: 100%; border-collapse: collapse; font-size: 13px; color: #fff; }
+        th, td { border: 1px solid #1f2937; padding: 6px 8px; text-align: center; }
+        th { position: sticky; top: 0; background: #1f2937; color: var(--accent); }
+        .list { max-height: 160px; overflow:auto; padding-right:6px; }
+        .danger { background: var(--bad); border-color: var(--bad); }
+        .ghost { background:transparent; color:var(--accent); border-color:var(--accent); }
+        .grid { display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+        .help { background:#4f46e5; border:1px solid #6366f1; color:#eef2ff; padding:8px 10px; border-radius:10px; font-size:12px; }
+        .badge { font-size:11px; padding:.15rem .45rem; border-radius:6px; background:#374151; color:#fff; }
+        .retired-player { text-decoration: line-through; color: var(--muted); }
+        .pod { background: #1f2937; border-radius: 10px; padding: 10px; display: flex; flex-direction: column; gap: 8px; cursor: pointer; }
+        .pod.reported { cursor: default; }
+        .pod-players { display: flex; flex-direction: column; }
+        .pod-player { padding: 6px; background: #374151; border-radius: 8px; }
+        .pod-player.winner { background: #0c4a1e; font-weight: bold; }
+        .pod-player.eliminated { text-decoration: line-through; color: #6b7280; }
+
+        /* Estilos para el modal */
+        .modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background-color: rgba(0,0,0,0.8); display: flex; justify-content: center; align-items: center; z-index: 100;
+        }
+        .modal-content {
+            background-color: var(--card); padding: 20px; border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1); width: 90%; max-width: 500px;
+        }
+        .modal-footer {
+            margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;
+        }
+        .report-section { margin-bottom: 15px; }
+        .report-section h4 { margin-bottom: 8px; color: #fff; }
+        .report-players-grid { display: grid; gap: 10px; }
+        .report-player-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px; background: #111; border-radius: 8px; }
+        .report-player-row label { flex-grow: 1; }
+        .report-player-row select, .report-player-row .read-only-text { width: auto; flex-shrink: 0; }
+        .report-player-row.disabled { opacity: 0.5; }
+        
+        /* Nuevo estilo para la vista de rondas separadas */
+        .round-container { margin-bottom: 20px; }
+        .round-container h3 { margin-top: 0; margin-bottom: 10px; color: #fff; }
+
+        /* Estilos de trofeo para los 3 primeros lugares */
+        .gold-trophy { color: gold; font-weight: bold; }
+        .silver-trophy { color: silver; font-weight: bold; }
+        .bronze-trophy { color: #cd7f32; font-weight: bold; }
+        .trophy-emoji { margin-right: 8px; }
+        
+        /* Estilos de impresión para el PDF */
+        @media print {
+            body { background: white; padding: 0; margin: 0; color: #000; }
+            .wrap { max-width: none; padding: 10px; }
+            /* Ocultar elementos que no deben aparecer en el PDF */
+            .section, .header-logo, .header-title-group .pill, .section .row, .section .grid, #btnPair, #btnExport, #fileImport, #btnReset, #btnDemo, #rounds { display: none; }
+            .header { justify-content: center; }
+            #tournamentTitle { text-align: center; color: #000; }
+            .round-container { page-break-inside: avoid; }
+            #pairings { display: none; }
+            #tblStandings { border: 1px solid black; }
+            #tblStandings th, #tblStandings td { border: 1px solid black; color: #000; }
+            .modal { display: none !important; }
+        }
+    </style>
+</head>
+<body>
+    <div class="wrap">
+        <!-- Encabezado -->
+        <div class="header">
+            <img class="header-logo" src="https://placehold.co/100x100/fb0b01/fff?text=MTG" alt="Logo del Torneo">
+            <div class="header-title-group">
+                <h1 id="tournamentTitle" contenteditable="true" data-placeholder="Haz clic para editar el títlo">Gestor de Torneo de Commander</h1>
+                <span class="pill">Archivo único HTML</span>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Configuración y jugadores</h2>
+            <div class="row">
+                <input id="playerName" placeholder="Nombre del jugador" />
+                <button id="btnAdd">Agregar jugador</button>
+                <button id="btnDemo" class="ghost">Cargar demo (8 jugadores)</button>
+            </div>
+            <div class="row" style="margin-top:8px">
+                <label>Rondas: <input id="rounds" type="number" min="1" value="4" style="width:80px"/></label>
+            </div>
+            <div class="grid">
+                <div class="section" style="margin:0">
+                    <h3 style="margin:0 0 8px">Lista de jugadores</h3>
+                    <div id="playerList" class="list"></div>
+                </div>
+                <div class="section" style="margin:0">
+                    <h3 style="margin:0 0 8px">Acciones del torneo</h3>
+                    <div class="row">
+                        <button id="btnPair">Sortear siguiente ronda</button>
+                        <button id="btnExport" class="ghost">Exportar JSON</button>
+                        <label class="badge" for="fileImport" style="cursor:pointer">Importar JSON</label>
+                        <input id="fileImport" type="file" accept="application/json" style="display:none" />
+                        <button id="btnReset" class="ghost danger">Reiniciar todo</button>
+                    </div>
+                    <div class="muted">Ronda actual: <span id="roundNow">0</span> / <span id="roundTotal">4</span></div>
+                    <div class="row" style="margin-top: 10px;">
+                        <button id="btnPrint" class="ghost" disabled>Exportar a PDF</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Emparejamientos</h2>
+            <div id="pairings"></div>
+        </div>
+
+        <div class="section">
+            <h2>Ranking</h2>
+            <div style="max-height:260px; overflow:auto">
+                <table id="tblStandings">
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Jugador</th>
+                            <th>Score</th>
+                            <th>PWP</th>
+                            <th>Buchholz</th>
+                            <th>Victorias</th>
+                            <th>Elims</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para el mensaje de confirmación -->
+    <div id="confirmModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <p id="confirmMessage"></p>
+            <div class="modal-footer">
+                <button id="cancelButton" class="ghost">Cancelar</button>
+                <button id="confirmButton">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal para el reporte de resultados -->
+    <div id="reportModal" class="modal" style="display: none;">
+        <div class="modal-content">
+            <h3 id="reportTitle">Reportar resultados del Pod</h3>
+            <div id="reportContent"></div>
+            <div class="modal-footer">
+                <button id="cancelReport" class="ghost">Cancelar</button>
+                <button id="saveReport">Guardar Resultados</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Archivos necesarios para la PWA (están en caché)
+        const CACHE_NAME = 'tournament-commander-cache-v1';
+        const urlsToCache = [
+            '/',
+            '/index.html',
+            '/style.css', // O si el CSS está en línea, no es necesario.
+            'manifest.json',
+            'service-worker.js',
+            'https://placehold.co/100x100/fb0b01/fff?text=MTG',
+            'https://placehold.co/192x192/fb0b01/fff?text=MTG',
+            'https://placehold.co/180x180/fb0b01/fff?text=MTG',
+        ];
+
+        self.addEventListener('install', (event) => {
+            event.waitUntil(
+                caches.open(CACHE_NAME)
+                    .then((cache) => {
+                        console.log('Cache abierta');
+                        return cache.addAll(urlsToCache);
+                    })
+            );
+        });
+
+        self.addEventListener('fetch', (event) => {
+            event.respondWith(
+                caches.match(event.request)
+                    .then((response) => {
+                        if (response) {
+                            return response;
+                        }
+                        return fetch(event.request);
+                    })
+            );
+        });
+        
+        // El resto de tu código JS aquí
+        // ===== Datos en memoria =====
+        const uid = () => Math.random().toString(36).slice(2,10);
+        
+        // Estructura de un match: {id, round, players:[], winner:null, eliminatedPlayers:[{eliminatedId, eliminatorId}], isTie:false}
+        let players = []; // {id, name, active: true}
+        let matches = [];
+        let currentRound = 0;
+        let totalRounds = 4;
+        
+        // Puntos y criterios de desempate
+        const SCORING = {
+            win: 3,
+            elimination: 1,
+            tie: 1,
+            cap: 3
+        };
+
+        // ===== Utiles =====
+        const el = sel => document.querySelector(sel);
+        const els = sel => document.querySelectorAll(sel);
+        
+        function shuffle(arr){ const a=[...arr]; for(let i=a.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [a[i],a[j]]=[a[j],a[i]]; } return a; }
+        
+        function getOpponents(playerId) {
+            const opponents = new Set();
+            for (const m of matches) {
+                if (m.round < currentRound && m.players.includes(playerId)) {
+                    m.players.filter(id => id !== playerId).forEach(id => opponents.add(id));
+                }
+            }
+            return [...opponents];
+        }
+
+        /**
+         * Calcula las estadísticas de cada jugador, incluyendo Score, PWP, Buchholz y eliminaciones.
+         * @returns {Array} Un arreglo de objetos con las estadísticas de cada jugador.
+         */
+        function calcStats(){
+            const statsMap = new Map();
+            for(const p of players){
+                statsMap.set(p.id, {
+                    playerId: p.id,
+                    name: p.name,
+                    active: p.active,
+                    points: 0,
+                    podWins: 0,
+                    eliminations: 0,
+                    opponentsPoints: 0,
+                    pwp: 0,
+                    buchholz: 0,
+                    opponentCount: 0
+                });
+            }
+            
+            // Calculo de puntos por pod y aplicación del tope
+            for(const m of matches){
+                if (m.round > currentRound) continue;
+                
+                const podPoints = new Map();
+                for(const pId of m.players) podPoints.set(pId, 0);
+
+                if (m.winner) {
+                    podPoints.set(m.winner, SCORING.win);
+                } else if (m.isTie) {
+                    for(const pId of m.players) podPoints.set(pId, SCORING.tie);
+                }
+
+                if(m.eliminatedPlayers && m.eliminatedPlayers.length > 0) {
+                    const currentPoints = new Map();
+                    for(const pId of m.players) currentPoints.set(pId, podPoints.get(pId) || 0);
+
+                    for(const elInfo of m.eliminatedPlayers) {
+                        const eliminatorId = elInfo.eliminatorId;
+                        if(eliminatorId) {
+                            currentPoints.set(eliminatorId, (currentPoints.get(eliminatorId) || 0) + SCORING.elimination);
+                        }
+                    }
+
+                    for(const pId of m.players) {
+                        const points = currentPoints.get(pId);
+                        podPoints.set(pId, Math.min(SCORING.cap, points));
+                    }
+                }
+                
+                for(const pId of m.players) {
+                    const stats = statsMap.get(pId);
+                    if (stats) {
+                        stats.points += (podPoints.get(pId) || 0);
+                        if (m.winner === pId) stats.podWins += 1;
+                    }
+                }
+
+                if (m.eliminatedPlayers) {
+                    m.eliminatedPlayers.forEach(elInfo => {
+                        const stats = statsMap.get(elInfo.eliminatorId);
+                        if(stats) {
+                            stats.eliminations += 1;
+                        }
+                    });
+                }
+            }
+
+            // Calculo de Buchholz y PWP
+            for (const s of statsMap.values()) {
+                const opponents = getOpponents(s.playerId);
+                s.opponentCount = opponents.length;
+                if (opponents.length > 0) {
+                    let totalOpponentPoints = 0;
+                    opponents.forEach(oppId => {
+                        const oppStats = statsMap.get(oppId);
+                        if (oppStats) {
+                            totalOpponentPoints += oppStats.points;
+                        }
+                    });
+                    // Buchholz es la suma de los puntos de los oponentes
+                    s.buchholz = totalOpponentPoints;
+                }
+                
+                // PWP es el porcentaje de puntos obtenidos sobre el máximo posible
+                s.pwp = currentRound > 0 ? (s.points / (currentRound * SCORING.cap)) : 0;
+            }
+            return [...statsMap.values()];
+        }
+
+        /**
+         * Ordena el ranking de jugadores usando los criterios de desempate.
+         * 1. Puntos (Score)
+         * 2. PWP (Player Match Win Percentage)
+         * 3. Buchholz
+         * 4. Victorias de Pod
+         * 5. Eliminaciones
+         * 6. Nombre (alfabético)
+         * @param {Array} stats - El arreglo de estadísticas de los jugadores.
+         * @returns {Array} Un arreglo ordenado de estadísticas de los jugadores.
+         */
+        function sortRanking(stats){
+            return [...stats].sort((a,b)=>
+                b.points-a.points ||
+                b.pwp - a.pwp ||
+                b.buchholz - a.buchholz ||
+                b.podWins-a.podWins ||
+                b.eliminations-a.eliminations ||
+                a.name.localeCompare(b.name)
+            );
+        }
+        
+        /**
+         * Realiza el emparejamiento de jugadores en pods de 3 o 4.
+         * Prioriza mesas de 4 y ajusta con mesas de 3 para que nadie quede suelto.
+         * @param {number} round - El número de la ronda actual.
+         * @returns {Array} - Un arreglo de objetos que representan los pods.
+         */
+        function commanderPair(round) {
+            const activePlayers = shuffle(players.filter(p => p.active));
+            let totalPlayers = activePlayers.length;
+            const pods = [];
+            let i = 0;
+            
+            // Un mínimo de 3 jugadores es necesario para una ronda.
+            if (totalPlayers < 3) {
+                return [];
+            }
+            
+            let numPods4 = 0;
+            let numPods3 = 0;
+            const remainder = totalPlayers % 4;
+
+            if (remainder === 0) {
+                numPods4 = totalPlayers / 4;
+            } else if (remainder === 1) {
+                if (totalPlayers === 5) {
+                    alert('No es posible emparejar 5 jugadores en mesas de 3 o 4 sin dejar a un jugador suelto o crear una mesa de 2.');
+                    return [];
+                }
+                // Para 9, 13, 17, 21... se usan 3 mesas de 3, y el resto se llena con mesas de 4
+                numPods3 = 3;
+                numPods4 = (totalPlayers - 9) / 4;
+            } else if (remainder === 2) {
+                // Para 6, 10, 14, 18... se usan 2 mesas de 3, y el resto se llena con mesas de 4
+                numPods3 = 2;
+                numPods4 = (totalPlayers - 6) / 4;
+            } else { // remainder === 3
+                // Para 3, 7, 11, 15... se usa 1 mesa de 3, y el resto se llena con mesas de 4
+                numPods3 = 1;
+                numPods4 = (totalPlayers - 3) / 4;
+            }
+            
+            // Crear los pods de 4
+            for(let p = 0; p < numPods4; p++){
+                const podPlayers = activePlayers.slice(i, i + 4);
+                 pods.push({
+                    id: uid(),
+                    round,
+                    players: podPlayers.map(p => p.id),
+                    winner: null,
+                    isTie: false,
+                    eliminatedPlayers: []
+                });
+                i += 4;
+            }
+
+            // Crear los pods de 3
+            for(let p = 0; p < numPods3; p++){
+                const podPlayers = activePlayers.slice(i, i + 3);
+                 pods.push({
+                    id: uid(),
+                    round,
+                    players: podPlayers.map(p => p.id),
+                    winner: null,
+                    isTie: false,
+                    eliminatedPlayers: []
+                });
+                i += 3;
+            }
+
+            return pods;
+        }
+
+        // ===== Render y Estado de UI =====
+        
+        function updateUIState() {
+            const pairBtn = el('#btnPair');
+            const printBtn = el('#btnPrint');
+            const allMatchesReported = matches.filter(m => m.round === currentRound).every(m => !!m.winner || m.isTie || m.players.length === m.eliminatedPlayers.length);
+            
+            const isTournamentOver = currentRound >= totalRounds;
+
+            if (isTournamentOver) {
+                pairBtn.disabled = true;
+                pairBtn.textContent = 'Torneo finalizado';
+            } else {
+                pairBtn.disabled = !allMatchesReported;
+                pairBtn.textContent = 'Sortear siguiente ronda';
+            }
+
+            printBtn.disabled = !isTournamentOver;
+
+            updateStandings();
+            renderPairings();
+        }
+
+        function renderPlayers(){
+            const box = el('#playerList'); box.innerHTML='';
+            players.forEach((p,idx)=>{
+                const row = document.createElement('div'); row.className='row'; row.style.justifyContent='space-between';
+                row.innerHTML = `<span style="text-decoration:${p.active?'none':'line-through'}">${idx+1}. ${p.name}</span>`;
+                const grp = document.createElement('div');
+                const btnDrop = document.createElement('button');
+                btnDrop.textContent = p.active? 'Retirar' : 'Activar';
+                btnDrop.className='ghost';
+                btnDrop.onclick = () => showConfirmModal(
+                    p.active ? `¿Estás seguro de retirar a ${p.name}?` : `¿Estás seguro de activar a ${p.name}?`,
+                    () => { p.active ? removePlayer(p.id) : addPlayerAgain(p.id); }
+                );
+                grp.appendChild(btnDrop); row.appendChild(grp); box.appendChild(row);
+            });
+        }
+        
+        function renderPairings(){
+            const box = el('#pairings'); box.innerHTML = '';
+            
+            const allRounds = new Set(matches.map(m => m.round).filter(r => r > 0));
+            const sortedRounds = Array.from(allRounds).sort((a,b) => a-b);
+            
+            sortedRounds.forEach(r => {
+                const roundContainer = document.createElement('div');
+                roundContainer.className = 'round-container';
+                
+                const title = document.createElement('h3');
+                const closed = matches.filter(m=>m.round===r).every(m=>!!m.winner || m.isTie || m.players.length === m.eliminatedPlayers.length);
+                title.textContent = `Ronda ${r} ${closed? '(cerrada)':'(en juego)'}`;
+                roundContainer.appendChild(title);
+                
+                const podsContainer = document.createElement('div');
+                podsContainer.className = 'grid';
+
+                matches.filter(m=>m.round===r).forEach((m, idx) => {
+                    const pod = document.createElement('div');
+                    pod.className = 'pod';
+                    
+                    const isCurrentRound = m.round === currentRound;
+                    
+                    if (isCurrentRound) {
+                        pod.onclick = () => showReportModal(m.id);
+                    } else {
+                        pod.onclick = () => showResultsModal(m.id);
+                        pod.classList.add('reported');
+                    }
+                    
+                    const podTitle = document.createElement('div');
+                    podTitle.innerHTML = `<b>Pod ${idx + 1}</b>`;
+                    pod.appendChild(podTitle);
+
+                    const playersContainer = document.createElement('div');
+                    playersContainer.className = 'pod-players';
+                    
+                    m.players.forEach(pId => {
+                        const player = players.find(p => p.id === pId);
+                        const playerDiv = document.createElement('div');
+                        playerDiv.className = 'pod-player';
+                        playerDiv.textContent = player ? player.name : 'Jugador Retirado';
+                        
+                        const isWinner = m.winner === pId;
+                        const isEliminated = m.eliminatedPlayers.some(ep => ep.eliminatedId === pId);
+                        
+                        if (isWinner) {
+                            playerDiv.classList.add('winner');
+                        }
+                        if (isEliminated) {
+                            playerDiv.classList.add('eliminated');
+                        }
+                        
+                        playersContainer.appendChild(playerDiv);
+                    });
+                    
+                    pod.appendChild(playersContainer);
+                    podsContainer.appendChild(pod);
+                });
+                
+                roundContainer.appendChild(podsContainer);
+                box.appendChild(roundContainer);
+            });
+        }
+        
+        /**
+         * Actualiza la tabla de clasificación con los nuevos cálculos de puntos, PWP y Buchholz.
+         */
+        function updateStandings(){
+            const stats = sortRanking(calcStats());
+            const tbody = el('#tblStandings tbody'); tbody.innerHTML='';
+            
+            const isTournamentOver = currentRound >= totalRounds;
+
+            stats.forEach((s,idx)=>{
+                const tr=document.createElement('tr');
+                const playerNameHtml = s.active ? s.name : `<span class="retired-player">${s.name}</span>`;
+
+                if(isTournamentOver && idx < 3) {
+                    let medal = '';
+                    if (idx === 0) {
+                        medal = '🏆 ';
+                        tr.classList.add('gold-trophy');
+                    } else if (idx === 1) {
+                        medal = '🥈 ';
+                        tr.classList.add('silver-trophy');
+                    } else if (idx === 2) {
+                        medal = '🥉 ';
+                        tr.classList.add('bronze-trophy');
+                    }
+                    playerNameHtml = `<span class="trophy-emoji">${medal}</span>` + playerNameHtml;
+                }
+                
+                const pwpFormatted = s.pwp.toFixed(2);
+                const buchholzFormatted = s.buchholz.toFixed(2);
+                tr.innerHTML = `<td>${idx+1}</td><td style="text-align:left">${playerNameHtml}</td><td>${s.points}</td><td>${pwpFormatted}</td><td>${buchholzFormatted}</td><td>${s.podWins}</td><td>${s.eliminations}</td>`;
+                tbody.appendChild(tr);
+            });
+            el('#roundNow').textContent = String(currentRound);
+            el('#roundTotal').textContent = String(totalRounds);
+            renderPlayers();
+        }
+
+        // ===== Modales personalizadas =====
+        function showConfirmModal(message, onConfirm) {
+            const modal = document.getElementById('confirmModal');
+            document.getElementById('confirmMessage').textContent = message;
+            modal.style.display = 'flex';
+
+            document.getElementById('confirmButton').onclick = () => {
+                onConfirm();
+                modal.style.display = 'none';
+            };
+            document.getElementById('cancelButton').onclick = () => {
+                modal.style.display = 'none';
+            };
+        }
+
+        // Modal de solo lectura para rondas anteriores
+        function showResultsModal(matchId) {
+            const match = matches.find(m => m.id === matchId);
+            if (!match) return;
+            const podPlayers = match.players.map(pId => players.find(p => p.id === pId));
+            
+            let winnerHtml = 'Sin ganador reportado';
+            if (match.winner) {
+                const winnerPlayer = players.find(p => p.id === match.winner);
+                winnerHtml = winnerPlayer ? winnerPlayer.name : 'Jugador Retirado';
+            } else if (match.isTie) {
+                winnerHtml = 'Empate en la mesa';
+            }
+            
+            const eliminationsHtml = match.eliminatedPlayers.length > 0
+                ? match.eliminatedPlayers.map(ep => {
+                    const eliminatedName = players.find(p => p.id === ep.eliminatedId)?.name || 'Jugador Retirado';
+                    const eliminatorName = players.find(p => p.id === ep.eliminatorId)?.name || 'Jugador Retirado';
+                    return `<div class="report-player-row"><span>${eliminatedName}</span><span class="read-only-text">eliminado por ${eliminatorName}</span></div>`;
+                }).join('')
+                : '<div class="muted">No hubo eliminaciones reportadas.</div>';
+
+            const modal = document.getElementById('reportModal');
+            document.getElementById('reportTitle').textContent = `Resultados del Pod (Ronda ${match.round})`;
+            document.getElementById('reportContent').innerHTML = `
+                <div class="report-section">
+                    <h4>Ganador o Empate</h4>
+                    <div class="report-players-grid">
+                        ${podPlayers.map(p => `
+                            <div class="report-player-row">
+                                <label>${p.name}</label>
+                                <span class="read-only-text">${p.id === match.winner ? 'Ganador' : (match.isTie ? 'Empate' : '')}</span>
+                            </div>
+                        `).join('')}
+                        <div class="report-player-row">
+                            <label>Ganador: </label>
+                            <span class="read-only-text">${winnerHtml}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="report-section">
+                    <h4>Eliminaciones</h4>
+                    <div class="report-players-grid">
+                        ${eliminationsHtml}
+                    </div>
+                </div>
+            `;
+            
+            // Ocultar botones de guardar y cancelar en el modal de solo lectura
+            document.getElementById('saveReport').style.display = 'none';
+            document.getElementById('cancelReport').textContent = 'Cerrar';
+            
+            modal.style.display = 'flex';
+            
+            document.getElementById('cancelReport').onclick = () => {
+                modal.style.display = 'none';
+                document.getElementById('saveReport').style.display = '';
+                document.getElementById('cancelReport').textContent = 'Cancelar';
+            };
+        }
+
+        // Modal para reportar/editar resultados de la ronda actual
+        function showReportModal(matchId) {
+            const match = matches.find(m => m.id === matchId);
+            if (!match) return;
+            const podPlayers = match.players.map(pId => players.find(p => p.id === pId));
+
+            const eliminationsHtml = podPlayers.map(eliminatedPlayer => {
+                const currentEliminator = match.eliminatedPlayers.find(ep => ep.eliminatedId === eliminatedPlayer.id)?.eliminatorId;
+                const optionsHtml = podPlayers
+                    .filter(p => p.id !== eliminatedPlayer.id)
+                    .map(eliminator => `
+                        <option value="${eliminator.id}" ${currentEliminator === eliminator.id ? 'selected' : ''}>
+                            Eliminado por ${eliminator.name}
+                        </option>
+                    `).join('');
+                
+                return `
+                    <div class="report-player-row" data-player-id="${eliminatedPlayer.id}">
+                        <label>${eliminatedPlayer.name}</label>
+                        <select data-eliminated-id="${eliminatedPlayer.id}">
+                            <option value="">No fue eliminado</option>
+                            ${optionsHtml}
+                        </select>
+                    </div>
+                `;
+            }).join('');
+
+            const modal = document.getElementById('reportModal');
+            document.getElementById('reportTitle').textContent = `Reportar resultados del Pod`;
+            document.getElementById('reportContent').innerHTML = `
+                <div class="report-section">
+                    <h4>Ganador de la mesa (3 pts) o Empate (1 pt)</h4>
+                    <div class="report-players-grid">
+                        ${podPlayers.map(p => `
+                            <div class="report-player-row" data-player-id="${p.id}">
+                                <label>
+                                    <input type="radio" name="winner-tie" value="${p.id}" ${match.winner === p.id ? 'checked' : ''} data-player-id="${p.id}">
+                                    ${p.name}
+                                </label>
+                            </div>
+                        `).join('')}
+                        <div class="report-player-row">
+                            <label>
+                                <input type="radio" name="winner-tie" value="tie" ${match.isTie ? 'checked' : ''} data-player-id="tie">
+                                Mesa Empatada
+                            </label>
+                        </div>
+                        <div class="report-player-row">
+                            <label>
+                                <input type="radio" name="winner-tie" value="none" ${!match.winner && !match.isTie ? 'checked' : ''} data-player-id="none">
+                                Sin ganador (solo eliminaciones)
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="report-section">
+                    <h4>Eliminaciones (1 pt c/u hasta 3 pts)</h4>
+                    <p class="muted">Selecciona a los jugadores eliminados y quién los eliminó.</p>
+                    <div class="report-players-grid">
+                        ${eliminationsHtml}
+                    </div>
+                </div>
+            `;
+            
+            // Mostrar botones de guardar y cancelar en el modal
+            document.getElementById('saveReport').style.display = '';
+            document.getElementById('cancelReport').textContent = 'Cancelar';
+            
+            modal.style.display = 'flex';
+            
+            const winnerRadios = els('input[name="winner-tie"]');
+            const eliminationSelects = els('.report-section select');
+            
+            function updateSelectionStates() {
+                const winnerTieSelection = el('input[name="winner-tie"]:checked');
+                const winnerId = winnerTieSelection && winnerTieSelection.value !== 'tie' && winnerTieSelection.value !== 'none' ? winnerTieSelection.value : null;
+                
+                eliminationSelects.forEach(selectEl => {
+                    const eliminatedId = selectEl.dataset.eliminatedId;
+                    const row = selectEl.closest('.report-player-row');
+                    selectEl.disabled = (eliminatedId === winnerId);
+                    row.classList.toggle('disabled', selectEl.disabled);
+                    if (selectEl.disabled) {
+                        selectEl.value = '';
+                    }
+                });
+
+                const eliminatedPlayerIds = Array.from(eliminationSelects)
+                    .filter(s => s.value)
+                    .map(s => s.dataset.eliminatedId);
+
+                winnerRadios.forEach(radio => {
+                    const playerId = radio.dataset.playerId;
+                    const row = radio.closest('.report-player-row');
+                    const isEliminated = eliminatedPlayerIds.includes(playerId);
+
+                    if (playerId !== 'tie' && playerId !== 'none') {
+                         radio.disabled = isEliminated;
+                         row.classList.toggle('disabled', radio.disabled);
+                         if (radio.checked && isEliminated) {
+                            el(`input[data-player-id="none"]`).checked = true;
+                         }
+                    }
+                });
+            }
+
+            winnerRadios.forEach(radio => {
+                radio.addEventListener('change', updateSelectionStates);
+            });
+
+            eliminationSelects.forEach(selectEl => {
+                selectEl.addEventListener('change', updateSelectionStates);
+            });
+
+            updateSelectionStates();
+
+            document.getElementById('saveReport').onclick = () => {
+                const winnerTieSelection = el('input[name="winner-tie"]:checked');
+                const winnerId = winnerTieSelection && winnerTieSelection.value !== 'tie' && winnerTieSelection.value !== 'none' ? winnerTieSelection.value : null;
+                const isTie = winnerTieSelection && winnerTieSelection.value === 'tie';
+                
+                const eliminatedPlayers = [];
+                eliminationSelects.forEach(selectEl => {
+                    const eliminatedId = selectEl.dataset.eliminatedId;
+                    const eliminatorId = selectEl.value;
+                    if (eliminatorId) {
+                        eliminatedPlayers.push({ eliminatedId, eliminatorId });
+                    }
+                });
+
+                showConfirmModal(
+                    `¿Confirmas estos resultados para el pod?`,
+                    () => {
+                        match.winner = winnerId;
+                        match.isTie = isTie;
+                        match.eliminatedPlayers = eliminatedPlayers;
+                        updateUIState();
+                        modal.style.display = 'none';
+                    }
+                );
+            };
+
+            document.getElementById('cancelReport').onclick = () => {
+                modal.style.display = 'none';
+            };
+        }
+
+        // ===== Acciones =====
+        function addPlayer(){
+            const name = el('#playerName').value.trim();
+            if(!name) return;
+            if(players.some(p=>p.name.toLowerCase()===name.toLowerCase())){ alert('Ese nombre ya está inscrito.'); return; }
+            players.push({ id:uid(), name, active:true});
+            el('#playerName').value='';
+            updateUIState();
+        }
+        
+        function removePlayer(id){
+            const player = players.find(p => p.id === id);
+            if (!player) return;
+            // Solo se puede retirar a un jugador si no está en un pod activo en esta ronda
+            const hasOpenMatch = matches.some(m => m.round === currentRound && (m.winner === null || m.isTie || m.players.length !== m.eliminatedPlayers.length) && m.players.includes(id));
+            if (hasOpenMatch) {
+                alert('No puedes retirar a este jugador mientras tiene una partida abierta en esta ronda.');
+                return;
+            }
+            player.active = false;
+            updateUIState();
+        }
+        
+        function addPlayerAgain(id) {
+            const player = players.find(p => p.id === id);
+            if (player) {
+                player.active = true;
+                updateUIState();
+            }
+        }
+
+        function pairNextRound(){
+            const isTournamentOver = currentRound >= totalRounds;
+            if (isTournamentOver) {
+                // Lógica de finalización de torneo. El botón se desactiva y el ranking se destaca.
+                updateUIState();
+                return;
+            }
+
+            const activePlayers = players.filter(p => p.active);
+            if (activePlayers.length < 3) {
+                alert('Se necesitan al menos 3 jugadores activos para sortear una ronda.');
+                return;
+            }
+
+            const allMatchesReported = matches.filter(m => m.round === currentRound).every(m => !!m.winner || m.isTie || m.players.length === m.eliminatedPlayers.length);
+            if (!allMatchesReported) {
+                alert('Debes reportar los resultados de todos los pods de la ronda actual antes de sortear la siguiente.');
+                return;
+            }
+
+            currentRound += 1;
+            const newMatches = commanderPair(currentRound);
+            matches.push(...newMatches);
+            updateUIState();
+        }
+        
+        function exportJson(){
+            const data = { players, matches, currentRound, totalRounds };
+            const blob = new Blob([JSON.stringify(data,null,2)], {type:'application/json'});
+            const url = URL.createObjectURL(blob); const a=document.createElement('a'); a.href=url; a.download='torneo-commander.json'; a.click(); URL.revokeObjectURL(url);
+        }
+
+        function importJson(file){
+            const reader = new FileReader(); reader.onload = ()=>{
+                try{ const obj = JSON.parse(String(reader.result));
+                    if(!obj.players || !obj.matches) throw new Error('inválido');
+                    players = obj.players; matches = obj.matches; currentRound = obj.currentRound||0; totalRounds = obj.totalRounds||4;
+                    updateUIState();
+                } catch(e){ alert('No se pudo importar el archivo.'); }
+            }; reader.readAsText(file);
+        }
+
+        function resetAll(){
+            showConfirmModal('¿Borrar TODO el torneo?', () => {
+                players=[]; matches=[]; currentRound=0; totalRounds=Number(el('#rounds').value)||4;
+                updateUIState();
+            });
+        }
+
+        function loadDemo(){
+            if(players.length > 0 || matches.length > 0){
+                showConfirmModal('Esto reemplazará los datos actuales. ¿Continuar?', () => {
+                    players = Array.from({length:8},(_,i)=>({id:uid(), name:`Jugador ${i+1}`, active: true}));
+                    matches=[]; currentRound=0; totalRounds=3; el('#rounds').value='3';
+                    updateUIState();
+                });
+            } else {
+                 players = Array.from({length:8},(_,i)=>({id:uid(), name:`Jugador ${i+1}`, active: true}));
+                 matches=[]; currentRound=0; totalRounds=3; el('#rounds').value='3';
+                 updateUIState();
+            }
+        }
+
+        // ===== Eventos =====
+        el('#btnAdd').onclick = addPlayer;
+        el('#btnPair').onclick = pairNextRound;
+        el('#btnExport').onclick = exportJson;
+        el('#fileImport').onchange = (e)=>{ if(e.target.files && e.target.files[0]) importJson(e.target.files[0]); };
+        el('#btnReset').onclick = resetAll;
+        el('#btnDemo').onclick = loadDemo;
+        el('#rounds').onchange = ()=>{ totalRounds = Math.max(1, Number(el('#rounds').value)||4); updateUIState(); };
+        el('#btnPrint').onclick = () => window.print();
+
+        // ===== Init =====
+        updateUIState();
+    </script>
+</body>
+</html>
